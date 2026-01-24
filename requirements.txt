@@ -1,0 +1,11 @@
+# Web Server (Using Waitress for better performance on single-core Pi)
+Flask==3.0.0
+waitress==3.0.0
+
+# MIDI Handling
+mido==1.3.0
+python-rtmidi==1.5.8
+
+# Hardware Interaction
+gpiozero==2.0.1
+RPi.GPIO==0.7.1
