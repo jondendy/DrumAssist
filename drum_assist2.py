@@ -50,7 +50,21 @@ def run_sequencer():
     while True:
         if state["playing"]:
             pattern = patterns[state["current_idx"]]["beats"]
-            is_accent = (step % len(pattern) == 0)
+            is_downbeat = (step % len(pattern) == 0)
+            if is_downbeat:
+
+            # Stronger flash and higher MIDI note for the "1"
+                note = 39 
+                led_beat.on()
+                time.sleep(0.15) # Longer flash
+            else:
+                 # Standard click
+                 note = 37
+                 led_beat.on()
+                 time.sleep(0.05) # Short sharp flash
+
+            led_beat.off()
+
             
             # MIDI Note selection
             note = 39 if is_accent else 37 
