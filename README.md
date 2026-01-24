@@ -399,3 +399,15 @@ Use raspi-config or a tool like RaspAP to set up the hotspot.
 Once set up, connect your phone to the Pi's Wi-Fi network (e.g., "DrumPi").
 
 Open your browser and type the Pi's IP address (usually 192.168.4.1 or drumpi.local).
+
+One tip for the Old Pi Zero: Since the CPU is slower, install waitress instead of using the default Flask server for slightly better stability, though for one user (you), Flask's built-in server is acceptable.
+
+Bash
+
+pip install waitress
+Then in your python script, change the last line to:
+
+Python
+
+from waitress import serve
+serve(app, host='0.0.0.0', port=80)
