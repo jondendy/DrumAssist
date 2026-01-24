@@ -38,6 +38,16 @@ load_state() # Run on boot
 def handle_tap():
     # ... (same tap logic as before) ...
     save_state() # Save whenever you change it
+    import json
+
+    def save_drum_settings(bpm, pattern_idx):
+        settings = {'bpm': bpm, 'pattern': pattern_idx}
+        with open('/home/pi/drum_helper_v2.json', 'w') as f:
+            json.dump(settings, f)
+        print("Settings saved for next time!")
+
+# Call this inside your 'handle_tap' or 'next_pattern' functions!
+
 
 def next_pattern():
     state["current_idx"] = (state["current_idx"] + 1) % len(patterns)
