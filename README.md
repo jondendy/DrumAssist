@@ -2,53 +2,8 @@
 simple metronomic sample generation to drive sample pad or drum machine for in-ear click track
 
 
-New chat
-My stuff
-Thermal Report Site Builder
-Thermal Image Action Workflow
-TP-lib Import Example
-Gems
-Chats
-Radio Modification Difficulty Discussed
-Pinned chat
-Raspberry Pi MIDI Sequencer Software
-Raspberry Pi Circuit Hat Control
-Raspberry Pi MIDI Sync Project
-Clarifying "Sound Sample Pro"
-Requesting Tools For Service Dashboard
-Program Task and Lunch Break
-Digital Product Niches From User Data
-Can I do split screen on my phone?
-Water Temperature Mixing Ratios Recalculated
-UK Time Conversion For Event
-Adjusting Recording Trim on Mobile
-Fastest Route To Red Lion Street
-BBC Sounds App Content Types
 
-Activity
-
-Settings and help
-Chesham, UK
-Based on your places (home)
-Update location
-Conversation with Gemini
-So, can I write a software on a maybe basis on a last week my zero, not quite as powerful as um geodata, but able to run a sequencer.
-
-Yes, you can definitely write software for a Raspberry Pi Zero to function as a MIDI sequencer. While it's not as powerful as some dedicated devices, there are projects and software available that allow you to do that. Are you interested in a specific programming language or type of sequencer?
-
-Well, they see if there is a device if there is a package that would do it for me already. I can't you reuse something well then it'll be right there.
-
-Yes, there are likely packages and projects you can reuse. Many Raspberry Pi users leverage existing software or frameworks for MIDI sequencing. Are you looking for something that focuses on particular features, like specific MIDI inputs or outputs?
-
-I'm looking for a drummer's metronome.
-
-For a drum machine or metronome on the Raspberry Pi Zero, you could look into programming it with Python, using libraries such as pygame or midiutil. There are also dedicated projects and even distributions tailored for audio and MIDI applications that might have something suitable. Do you have any prior experience with Python or music programming?
-
-Uh, Python, yes, not so much music theory.
-
-In that case, focusing on Python libraries like pygame might be a good starting point. You can use them to create basic metronome functionality or even more complex drum machine patterns. Are you interested in any particular type of interface for your sequencer?
-
-Im planning on a headless setup for the pattern selection and hardware buttons for the start and tap tempo function
+I'm planning on a headless setup for the pattern selection and hardware buttons for the start and tap tempo function
 
 That is a perfect project for a Raspberry Pi Zero. Even though it’s low-power, a metronome or basic drum sequencer is mostly about precise timing, which the Zero can handle easily if you use the right libraries.
 
