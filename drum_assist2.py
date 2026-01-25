@@ -3,16 +3,25 @@ import time
 import threading
 import json
 import os
-from gpiozero import Button, LED
+# Try to import GPIO, but continue without it
+try:
+    from gpiozero import Button, LED
+    GPIO_AVAILABLE = True
+except (ImportError, RuntimeError):
+    GPIO_AVAILABLE = False
+    print("GPIO not available - buttons/LEDs disabled")
 
 # --- CONFIG ---
 SAVE_FILE = "dh2_settings.json"
 # Physical Pins: 11, 13, 15 for buttons. 12, 16 for LEDs.
-btn_start = Button(17)  # Red
-btn_tap   = Button(27)  # Blue
-btn_next  = Button(22)  # White
-led_beat   = LED(18) 
-led_status = LED(23)
+
+# --- HARDWARE SETUP (if available) ---
+if GPIO_AVAILABLE:
+    btn_start = Button(17)  # Red
+    btn_tap   = Button(27)  # Blue
+    btn_next  = Button(22)  # White
+    led_beat   = LED(18)
+    led_status = LED(23)
 
 # --- MIDI CONFIGURATION ---
 MIDI_CHANNEL = 9  # Channel 10 in MIDI terms (0-15)
@@ -81,23 +90,26 @@ def handle_start():
     if state["playing"]:
         global tap_times
         tap_times = []  # Reset taps on start
-        led_status.on()
+        if GPIO_AVAILABLE:
+            led_status.on()
         print(f"Started: {PATTERNS[state['current_idx']]['name']} at {state['bpm']} BPM")
     else:
-        led_status.off()
+        if GPIO_AVAILABLE:
+            led_status.off()
         print("Stopped")
 
 def next_pattern():
     state["current_idx"] = (state["current_idx"] + 1) % len(PATTERNS)
     save_state()
-    led_status.blink(on_time=0.1, n=3)
+    if GPIO_AVAILABLE:
+        led_status.blink(on_time=0.1, n=3)
     print(f"Pattern: {PATTERNS[state['current_idx']]['name']}")
 
 # Wire up buttons
-btn_tap.when_pressed = handle_tap
-btn_start.when_pressed = handle_start
-btn_next.when_pressed = next_pattern
-
+if GPIO_AVAILABLE:
+    btn_tap.when_pressed = handle_tap
+    btn_start.when_pressed = handle_start
+    btn_next.when_pressed = next_pattern
 # --- SEQUENCER ENGINE ---
 def run_sequencer():
     step = 0
@@ -123,12 +135,11 @@ def run_sequencer():
                 outport.send(mido.Message('note_off', note=note, velocity=0, channel=MIDI_CHANNEL))
             
             # LED Pulse
-            if note:
-                led_beat.on()
-                time.sleep(0.15 if is_accent else 0.05)
-                led_beat.off()
-            
-            # Calculate sleep based on BPM and Pattern Resolution
+            if GPIO_AVAILABLE:
+                if note:
+                    led_beat.on()
+                    time.sleep(0.15 if is_accent else 0.05)
+                    led_beat.off()            # Calculate sleep based on BPM and Pattern Resolution
             sleep_time = 60.0 / state["bpm"]
             if len(pattern) > 4:
                 sleep_time /= 2  # Speed up for eighth notes
@@ -166,6 +177,6 @@ try:
         time.sleep(1)
 except KeyboardInterrupt:
     print("\nShutting down...")
-    if state["playing"]:
+    if state["playing"] and GPIO_AVAILABLE:
         led_status.off()
-    led_beat.off()
+        led_beat.off()
