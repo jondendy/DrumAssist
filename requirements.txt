@@ -2,6 +2,9 @@
 Flask==3.0.0
 waitress==3.0.0
 
+
+# Desktop/Laptop Support
+pynput==1.7.6
 # MIDI Handling
 mido==1.3.0
 python-rtmidi==1.5.8
