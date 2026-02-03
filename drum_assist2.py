@@ -138,7 +138,7 @@ def run_sequencer():
                 state["step"] = 0
                 state["pattern_changed"] = False
             pattern = PATTERNS[state["current_idx"]]["beats"]
-            beat_type = pattern[step] ## % len(pattern)]
+            beat_type = pattern[step % len(pattern)]
             
             # Determine Note
             note = None
