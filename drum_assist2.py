@@ -43,8 +43,8 @@ PATTERNS = [
 
 # --- STATE MANAGEMENT ---
 state = {
-    "bpm": 120,
-    "current_idx": 0,
+    "bpm": 85,
+    "current_idx": 4,
     "playing": False,
     "step": 0,
     "pattern_changed": False,
@@ -131,6 +131,7 @@ if GPIO_AVAILABLE:
 # --- SEQUENCER ENGINE ---
 def run_sequencer():
     step = 0
+    last_beat_time = time.time()
     while True:
         if state["playing"]:
             if state["pattern_changed"]:
