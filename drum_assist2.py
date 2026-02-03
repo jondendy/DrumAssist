@@ -45,7 +45,9 @@ PATTERNS = [
 state = {
     "bpm": 120,
     "current_idx": 0,
-    "playing": False
+    "playing": False,
+    "step": 0,
+    "pattern_changed": False,
 }
 
 def save_state():
@@ -58,6 +60,21 @@ def load_state():
             data = json.load(f)
             state["bpm"] = data.get("bpm", 120)
             state["current_idx"] = data.get("idx", 0)
+
+def set_bpm(new_bpm):
+    if 30 <= new_bpm <= 300:
+        state["bpm"] = int(new_bpm)
+        save_state()
+
+def adjust_bpm(delta):
+    set_bpm(state["bpm"] + delta)
+
+def set_pattern(idx):
+    if 0 <= idx < len(PATTERNS):
+        state["current_idx"] = idx
+        state["pattern_changed"] = True
+        save_state()
+        print(f"Pattern: {PATTERNS[state['current_idx']]['name']}")
 
 load_state()  # Run on boot
 
@@ -110,13 +127,18 @@ if GPIO_AVAILABLE:
     btn_tap.when_pressed = handle_tap
     btn_start.when_pressed = handle_start
     btn_next.when_pressed = next_pattern
+    
 # --- SEQUENCER ENGINE ---
 def run_sequencer():
     step = 0
     while True:
         if state["playing"]:
+            if state["pattern_changed"]:
+                step = 0
+                state["step"] = 0
+                state["pattern_changed"] = False
             pattern = PATTERNS[state["current_idx"]]["beats"]
-            beat_type = pattern[step % len(pattern)]
+            beat_type = pattern[step] ## % len(pattern)]
             
             # Determine Note
             note = None
@@ -149,7 +171,9 @@ def run_sequencer():
             if remaining_time > 0:
                 time.sleep(remaining_time)
             
-            step += 1
+            # step += 1
+            step = (step + 1) % len(pattern)
+            state["step"] = step
         else:
             time.sleep(0.1)
 
