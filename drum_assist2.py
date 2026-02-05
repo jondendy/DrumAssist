@@ -54,8 +54,7 @@ if GPIO_AVAILABLE:
 
     btn_start.when_pressed = _startstop
     btn_tap.when_pressed = engine.handle_tap
-    btn_next.when_pressed = engine.next_pattern
-
+    btn_next.when_pressed = engine.next_button_action
 
 if __name__ == "__main__":
     engine.start_engine(beat_callback=beat_led_callback)
