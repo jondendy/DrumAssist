@@ -1,262 +1,168 @@
-import time
 import threading
-import json
-import os
 from flask import Flask, render_template_string, request, jsonify
 
-# --- CONFIG ---
-SAVE_FILE = "dh2_settings.json"
-
-# --- PATTERNS ---
-PATTERNS = [
-    {'name': '4/4 Basic', 'beats': [1, 2, 2, 2]},
-    {'name': '4/4 Subdivisions', 'beats': [1, 0, 2, 0, 2, 0, 2, 0]},
-    {'name': '6/8 Feel', 'beats': [1, 2, 2, 1, 2, 2]},
-    {'name': '3/4 Waltz', 'beats': [1, 2, 2]},
-    {'name': 'Prog Rock 7/8', 'beats': [1, 2, 1, 2, 1, 2, 2]}
-]
-
-# --- STATE ---
-state = {
-    "bpm": 120,
-    "current_idx": 0,
-    "playing": False,
-    "last_beat_type": 0,
-    "beat_count": 0
-}
+import engine
 
 app = Flask(__name__)
 
-def save_state():
-    with open(SAVE_FILE, 'w') as f:
-        json.dump({"bpm": state["bpm"], "idx": state["current_idx"]}, f)
-
-def load_state():
-    if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, 'r') as f:
-            data = json.load(f)
-            state["bpm"] = data.get("bpm", 120)
-            state["current_idx"] = data.get("idx", 0)
-
-load_state()
-
-# --- SEQUENCER ENGINE ---
-def run_sequencer():
-    step = 0
-    while True:
-        if state["playing"]:
-            pattern = PATTERNS[state["current_idx"]]["beats"]
-            beat_type = pattern[step % len(pattern)]
-            state["last_beat_type"] = beat_type
-            state["beat_count"] = step
-            
-            # Timing
-            sleep_time = 60.0 / state["bpm"]
-            if len(pattern) > 4:
-                sleep_time /= 2
-            
-            time.sleep(sleep_time)
-            step += 1
-        else:
-            state["last_beat_type"] = 0
-            time.sleep(0.1)
-
-# --- WEB UI ---
-HTML_TEMPLATE = """
-<!DOCTYPE html>
+HTML = """
+<!doctype html>
 <html>
 <head>
-    <title>Drum Assistant Web</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background: #1a1a1a; 
-            color: #eee; 
-            text-align: center; 
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            overflow: hidden;
-        }
-        #flash-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.05s;
-            cursor: pointer;
-            user-select: none;
-        }
-        .controls {
-            padding: 20px;
-            background: #2d2d2d;
-            border-top: 2px solid #444;
-        }
-        .bpm-display { font-size: 5rem; font-weight: bold; margin: 10px 0; color: #00ff00; }
-        button { 
-            font-size: 1.2rem; 
-            padding: 15px 30px; 
-            margin: 5px; 
-            border-radius: 10px; 
-            border: none; 
-            background: #007bff; 
-            color: white; 
-            font-weight: bold;
-            cursor: pointer;
-        }
-        button:active { transform: scale(0.98); }
-        .stop { background: #dc3545; }
-        select { font-size: 1.2rem; padding: 10px; border-radius: 5px; margin: 10px; }
-        
-        /* Flash Animations */
-        .flash-accent { background: #ff4444 !important; }
-        .flash-beat { background: #4444ff !important; }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin-bottom: 10px;
-        }
-        .playing { background: #28a745; color: white; }
-        .stopped { background: #6c757d; color: white; }
-    </style>
+  <meta charset="utf-8" />
+  <title>DrumAssist</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#111; color:#eee; text-align:center; margin:0; }
+    #flash { height: 55vh; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; }
+    .controls { padding:16px; background:#222; border-top:1px solid #333; }
+    .bpm { font-size: 64px; font-weight:700; color:#00ff66; margin:10px 0; }
+    button { font-size:18px; padding:12px 18px; margin:6px; border-radius:10px; border:0; cursor:pointer; }
+    .stop { background:#c0392b; color:#fff; }
+    .go { background:#2980b9; color:#fff; }
+    select { font-size:18px; padding:10px; border-radius:8px; margin:8px; }
+
+    #pattern { margin: 10px 0 0; line-height: 2.2; }
+    .step { padding:0.2rem 0.45rem; border-bottom:2px solid transparent; color:#ccc; }
+    .step.active { border-bottom-color:#ffcc00; color:#fff; }
+
+    .flash-accent { background:#7f1d1d; }
+    .flash-beat { background:#1d2a7f; }
+  </style>
 </head>
 <body>
-    <div id="flash-container" onclick="handleTap()">
-        <div>
-            <div id="status" class="status-badge stopped">STOPPED</div>
-            <div class="bpm-display" id="bpm-val">{{ bpm }}</div>
-            <div id="pattern-name" style="font-size: 1.5rem; opacity: 0.8;">{{ pattern_name }}</div>
-            <p style="opacity: 0.5;">Click anywhere or press SPACE to tap</p>
-        </div>
+  <div id="flash" onclick="tap()">Tap tempo (click)</div>
+
+  <div class="controls">
+    <div id="status">STOPPED</div>
+    <div class="bpm"><span id="bpm">--</span> BPM</div>
+
+    <div>
+      <button id="toggle" class="go" onclick="toggle()">START</button>
+      <button onclick="tap()">TAP</button>
+      <button onclick="adjust(-5)">-5</button>
+      <button onclick="adjust(5)">+5</button>
     </div>
 
-    <div class="controls">
-        <select id="pattern-select" onchange="updatePattern()">
-            {% for p in patterns %}
-            <option value="{{ loop.index0 }}" {% if loop.index0 == current_idx %}selected{% endif %}>{{ p.name }}</option>
-            {% endfor %}
-        </select>
-        <br>
-        <button id="toggle-btn" onclick="togglePlay()" class="">START</button>
-        <button onclick="handleTap()">TAP TEMPO</button>
+    <div>
+      <select id="patternSelect" onchange="setPattern()">
+        {% for p in patterns %}
+          <option value="{{ loop.index0 }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <button onclick="nextPattern()">Next</button>
     </div>
 
-    <script>
-        let lastBeatCount = -1;
-        
-        function togglePlay() {
-            fetch('/toggle').then(r => r.json()).then(updateUI);
-        }
+    <div id="pattern"></div>
+  </div>
 
-        function handleTap() {
-            fetch('/tap').then(r => r.json()).then(updateUI);
-        }
+<script>
+let lastBeatCount = -1;
 
-        function updatePattern() {
-            let idx = document.getElementById('pattern-select').value;
-            fetch('/set_pattern/' + idx).then(r => r.json()).then(updateUI);
-        }
+function renderPattern(beats, activeIdx) {
+  const el = document.getElementById('pattern');
+  el.innerHTML = '';
+  beats.forEach((b, i) => {
+    const s = document.createElement('span');
+    s.className = 'step' + (i === activeIdx ? ' active' : '');
+    s.dataset.index = i;
+    s.textContent = (b === 1 ? 'A' : (b === 2 ? '•' : '·'));
+    el.appendChild(s);
+  });
+}
 
-        function updateUI(data) {
-            document.getElementById('bpm-val').innerText = data.bpm;
-            let btn = document.getElementById('toggle-btn');
-            let status = document.getElementById('status');
-            
-            if (data.playing) {
-                btn.innerText = "STOP";
-                btn.className = "stop";
-                status.innerText = "PLAYING";
-                status.className = "status-badge playing";
-            } else {
-                btn.innerText = "START";
-                btn.className = "";
-                status.innerText = "STOPPED";
-                status.className = "status-badge stopped";
-            }
-        }
+function updateUI(data) {
+  document.getElementById('bpm').textContent = data.bpm;
+  document.getElementById('status').textContent = data.playing ? 'PLAYING' : 'STOPPED';
 
-        // Space bar listener
-        document.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') {
-                e.preventDefault();
-                handleTap();
-            } else if (e.code === 'Enter') {
-                togglePlay();
-            }
-        });
+  const btn = document.getElementById('toggle');
+  btn.textContent = data.playing ? 'STOP' : 'START';
+  btn.className = data.playing ? 'stop' : 'go';
 
-        // Polling for flashes and updates
-        setInterval(() => {
-            fetch('/status').then(r => r.json()).then(data => {
-                updateUI(data);
-                
-                if (data.playing && data.beat_count !== lastBeatCount) {
-                    lastBeatCount = data.beat_count;
-                    let container = document.getElementById('flash-container');
-                    
-                    if (data.last_beat_type === 1) {
-                        container.classList.add('flash-accent');
-                        setTimeout(() => container.classList.remove('flash-accent'), 100);
-                    } else if (data.last_beat_type === 2) {
-                        container.classList.add('flash-beat');
-                        setTimeout(() => container.classList.remove('flash-beat'), 50);
-                    }
-                }
-            });
-        }, 50);
-    </script>
+  const sel = document.getElementById('patternSelect');
+  sel.value = data.current_idx;
+
+  renderPattern(data.pattern_beats, data.step);
+
+  if (data.playing && data.beat_count !== lastBeatCount) {
+    lastBeatCount = data.beat_count;
+    const flash = document.getElementById('flash');
+    flash.classList.remove('flash-accent', 'flash-beat');
+    if (data.last_beat_type === 1) {
+      flash.classList.add('flash-accent');
+      setTimeout(()=>flash.classList.remove('flash-accent'), 120);
+    } else if (data.last_beat_type === 2) {
+      flash.classList.add('flash-beat');
+      setTimeout(()=>flash.classList.remove('flash-beat'), 80);
+    }
+  }
+}
+
+async function poll() {
+  const r = await fetch('/status');
+  updateUI(await r.json());
+}
+
+function toggle() { fetch('/toggle').then(r=>r.json()).then(updateUI); }
+function tap() { fetch('/tap', {method:'POST'}).then(r=>r.json()).then(updateUI); }
+function adjust(delta) {
+  fetch('/bpm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({delta})})
+    .then(r=>r.json()).then(updateUI);
+}
+function setPattern() {
+  const idx = document.getElementById('patternSelect').value;
+  fetch('/pattern/' + idx).then(r=>r.json()).then(updateUI);
+}
+function nextPattern() { fetch('/next').then(r=>r.json()).then(updateUI); }
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); tap(); }
+  if (e.code === 'Enter') { toggle(); }
+});
+
+setInterval(poll, 80);
+poll();
+</script>
 </body>
 </html>
 """
 
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template_string(HTML_TEMPLATE, 
-                                bpm=state["bpm"], 
-                                patterns=PATTERNS, 
-                                current_idx=state["current_idx"],
-                                pattern_name=PATTERNS[state["current_idx"]]["name"])
+    return render_template_string(HTML, patterns=engine.PATTERNS)
 
-@app.route('/status')
-def get_status():
-    return jsonify({
-        "bpm": state["bpm"],
-        "playing": state["playing"],
-        "last_beat_type": state["last_beat_type"],
-        "beat_count": state["beat_count"]
-    })
+@app.route("/status")
+def status():
+    st = engine.get_status()
+    beats = engine.PATTERNS[st["current_idx"]]["beats"]
+    st["pattern_beats"] = beats
+    return jsonify(st)
 
-@app.route('/toggle')
+@app.route("/toggle")
 def toggle():
-    state["playing"] = not state["playing"]
-    return get_status()
+    engine.handle_start()
+    return status()
 
-tap_times = []
-@app.route('/tap')
+@app.route("/tap", methods=["POST"])
 def tap():
-    global tap_times
-    now = time.time()
-    if tap_times and (now - tap_times[-1] > 2.0): tap_times = []
-    tap_times.append(now)
-    tap_times = tap_times[-4:]
-    if len(tap_times) >= 2:
-        intervals = [t - s for s, t in zip(tap_times, tap_times[1:])]
-        avg = sum(intervals) / len(intervals)
-        state["bpm"] = int(60.0 / avg)
-        save_state()
-    return get_status()
+    engine.handle_tap()
+    return status()
 
-@app.route('/set_pattern/<int:idx>')
-def set_pattern(idx):
-    state["current_idx"] = idx % len(PATTERNS)
-    save_state()
-    return get_status()
+@app.route("/bpm", methods=["POST"])
+def bpm():
+    data = request.get_json(force=True)
+    engine.adjust_bpm(int(data.get("delta", 0)))
+    return status()
 
-if __name__ == '__main__':
-    threading.Thread(target=run_sequencer, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+@app.route("/pattern/<int:idx>")
+def pattern(idx):
+    engine.set_pattern(idx)
+    return status()
+
+@app.route("/next")
+def nextp():
+    engine.next_pattern()
+    return status()
+
+if __name__ == "__main__":
+    engine.start_engine()
+    app.run(host="0.0.0.0", port=5000, debug=False)
