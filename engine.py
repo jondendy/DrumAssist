@@ -8,6 +8,8 @@ import mido
 
 SAVE_FILE = "dh2_settings.json"
 MIDI_CHANNEL = 9  # Channel 10 in MIDI terms (0-15)
+PATTERNS_FILE = "patterns.json"
+FILL_MAX_BARS = 2
 
 # Alesis SamplePad Note Numbers (GM-ish)
 SOUNDS = {
@@ -33,6 +35,8 @@ state = {
     "bpm": 85,
     "current_idx": 4,
     "playing": False,
+    "fill_pending_bars": 0,  # requested fills (queued to start at next bar)
+    "fill_active_bars": 0,   # fills currently being played (counts bars remaining)
 
     # karaoke / UI helpers
     "step": 0,
@@ -43,6 +47,105 @@ state = {
 
 _tap_times = []
 
+def _norm_lines(text: str) -> str:
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+def parse_rhythm(text: str):
+    """
+    Multi-line friendly parser.
+    Allowed tokens (spaces and '|' ignored):
+      A or 1  -> accent (1)
+      x or 2  -> click  (2)
+      . or 0 or - -> rest (0)
+    Any other char is ignored (so you can add labels if you want).
+    """
+    text = _norm_lines(text)
+    out = []
+    for ch in text:
+        if ch in (" ", "\t", "\n", "|"):
+            continue
+        if ch in ("A", "a", "1"):
+            out.append(1)
+        elif ch in ("x", "X", "2"):
+            out.append(2)
+        elif ch in (".", "0", "-"):
+            out.append(0)
+        else:
+            # ignore unknown characters
+            continue
+    return out
+
+def rhythm_to_text(beats):
+    # Single-line display (UI can still be multiline; this is just a formatter)
+    return " ".join("A" if b == 1 else ("x" if b == 2 else ".") for b in beats)
+
+def patterns_default():
+    # Convert your in-code PATTERNS into file format with optional fill
+    return [
+        {"name": p["name"], "beats": p["beats"], "fill": p.get("fill")}
+        for p in PATTERNS
+    ]
+
+def save_patterns():
+    try:
+        with _lock:
+            data = patterns_default()
+        with open(PATTERNS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving patterns: {e}")
+
+def load_patterns():
+    global PATTERNS
+    if not os.path.exists(PATTERNS_FILE):
+        return
+    try:
+        with open(PATTERNS_FILE, "r") as f:
+            data = json.load(f)
+        # validate minimally
+        cleaned = []
+        for p in data:
+            name = str(p.get("name", "Pattern"))
+            beats = p.get("beats", [])
+            fill = p.get("fill", None)
+            if not isinstance(beats, list) or not beats:
+                continue
+            beats = [int(x) for x in beats]
+            if fill is not None:
+                if not isinstance(fill, list) or len(fill) != len(beats):
+                    fill = None
+                else:
+                    fill = [int(x) for x in fill]
+            cleaned.append({"name": name, "beats": beats, "fill": fill})
+        if cleaned:
+            PATTERNS = cleaned
+            print(f"Loaded patterns from {PATTERNS_FILE}")
+    except Exception as e:
+        print(f"Error loading patterns: {e}")
+
+def update_pattern_from_text(idx: int, name: str, beats_text: str, fill_text: str):
+    idx = int(idx)
+    if not (0 <= idx < len(PATTERNS)):
+        raise ValueError("Bad pattern index")
+
+    beats = parse_rhythm(beats_text)
+    if not beats:
+        raise ValueError("Main rhythm is empty (use A/x/.)")
+
+    fill_text = (fill_text or "").strip()
+    fill = parse_rhythm(fill_text) if fill_text else None
+
+    # Keep life simple: fill must match main length
+    if fill is not None and len(fill) != len(beats):
+        raise ValueError(f"Fill length ({len(fill)}) must match main length ({len(beats)})")
+
+    with _lock:
+        PATTERNS[idx]["name"] = (name or PATTERNS[idx]["name"]).strip() or PATTERNS[idx]["name"]
+        PATTERNS[idx]["beats"] = beats
+        PATTERNS[idx]["fill"] = fill
+        state["pattern_changed"] = True  # forces step reset cleanly
+
+    save_patterns()
 
 def save_state():
     with _lock:
@@ -120,6 +223,28 @@ def set_pattern(idx: int):
     save_state()
     print(f"Pattern: {PATTERNS[idx]['name']}")
 
+def request_fill(bars: int = 1):
+    bars = int(bars)
+    if bars < 1:
+        return
+    bars = min(FILL_MAX_BARS, bars)
+
+    with _lock:
+        if not state["playing"]:
+            return
+        # queue to start at the next bar boundary
+        state["fill_pending_bars"] = min(FILL_MAX_BARS, state["fill_pending_bars"] + bars)
+
+def next_button_action():
+    # Stopped -> next pattern (current behavior)
+    # Playing -> request 1 bar fill (press twice to request 2 bars)
+    with _lock:
+        playing = state["playing"]
+    if playing:
+        request_fill(1)
+    else:
+        next_pattern()
+
 
 def next_pattern():
     with _lock:
@@ -179,6 +304,9 @@ def get_status():
             "pattern_len": len(PATTERNS[state["current_idx"]]["beats"]),
             "last_beat_type": state.get("last_beat_type", 0),
             "beat_count": state.get("beat_count", 0),
+            "has_fill": bool(PATTERNS[state["current_idx"]].get("fill")),
+            "fill_pending_bars": state.get("fill_pending_bars", 0),
+            "fill_active_bars": state.get("fill_active_bars", 0),
         }
 
 
@@ -206,9 +334,28 @@ def run_sequencer(beat_callback=None):
                 state["step"] = 0
                 state["pattern_changed"] = False
 
-        pattern = PATTERNS[idx]["beats"]
-        beat_type = pattern[step % len(pattern)]
+        p = PATTERNS[idx]
+        main = p["beats"]
+        fill = p.get("fill")
 
+        # At bar boundary (step==0), decide whether to start/continue a fill
+        if step % len(main) == 0:
+            with _lock:
+                if state.get("fill_active_bars", 0) > 0:
+                    # continue fill, decrement bar count now that a new bar is starting
+                    state["fill_active_bars"] -= 1
+                # if no active fill bars remaining, start queued fill
+                if state.get("fill_active_bars", 0) <= 0 and state.get("fill_pending_bars", 0) > 0:
+                    state["fill_active_bars"] = state["fill_pending_bars"]
+                    state["fill_pending_bars"] = 0
+
+        with _lock:
+            fill_active = state.get("fill_active_bars", 0)
+
+        use_fill = (fill_active > 0) and (fill is not None)
+        pattern = fill if use_fill else main
+        beat_type = pattern[step % len(pattern)]
+        
         note = None
         is_accent = False
         if beat_type == 1:
@@ -252,6 +399,7 @@ def start_engine(beat_callback=None):
     if _thread_started:
         return
     load_state()
+    load_patterns()
     init_midi()
     t = threading.Thread(target=run_sequencer, args=(beat_callback,), daemon=True)
     t.start()
