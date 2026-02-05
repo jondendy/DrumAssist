@@ -1,9 +1,6 @@
-import mido
+# drum_assist2.py
 import time
-import threading
-import json
-import os
-# Try to import GPIO, but continue without it
+
 try:
     from gpiozero import Button, LED
     GPIO_AVAILABLE = True
@@ -11,197 +8,66 @@ except (ImportError, RuntimeError):
     GPIO_AVAILABLE = False
     print("GPIO not available - buttons/LEDs disabled")
 
-# --- CONFIG ---
-SAVE_FILE = "dh2_settings.json"
-# Physical Pins: 11, 13, 15 for buttons. 12, 16 for LEDs.
+import engine
 
-# --- HARDWARE SETUP (if available) ---
-if GPIO_AVAILABLE:
-    btn_start = Button(17)  # Red
-    btn_tap   = Button(27)  # Blue
-    btn_next  = Button(22)  # White
-    led_beat   = LED(18)
-    led_status = LED(23)
+# GPIO pins (same as your current file)
+PIN_START = 17   # Red
+PIN_TAP = 27     # Blue
+PIN_NEXT = 22    # White
+PIN_BEAT_LED = 18
+PIN_STATUS_LED = 23
 
-# --- MIDI CONFIGURATION ---
-MIDI_CHANNEL = 9  # Channel 10 in MIDI terms (0-15)
-# Alesis SamplePad Note Numbers (Standard General MIDI)
-SOUNDS = {
-    'click': 37,   # Side Stick
-    'accent': 49,  # Crash Cymbal (or assign to a Cowbell on Alesis)
-    'subdiv': 42   # Closed Hi-Hat
-}
+led_beat = None
+led_status = None
 
-# --- PATTERNS (1 = Accent, 2 = Click, 0 = Rest/Subdivision) ---
-PATTERNS = [
-    {'name': '4/4 Basic', 'beats': [1, 2, 2, 2]},
-    {'name': '4/4 Subdivisions', 'beats': [1, 0, 2, 0, 2, 0, 2, 0]},
-    {'name': '6/8 Feel', 'beats': [1, 2, 2, 1, 2, 2]},
-    {'name': '3/4 Waltz', 'beats': [1, 2, 2]},
-    {'name': 'Prog Rock 7/8', 'beats': [1, 2, 1, 2, 1, 2, 2]}
-]
 
-# --- STATE MANAGEMENT ---
-state = {
-    "bpm": 85,
-    "current_idx": 4,
-    "playing": False,
-    "step": 0,
-    "pattern_changed": False,
-}
-
-def save_state():
-    with open(SAVE_FILE, 'w') as f:
-        json.dump({"bpm": state["bpm"], "idx": state["current_idx"]}, f)
-
-def load_state():
-    if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, 'r') as f:
-            data = json.load(f)
-            state["bpm"] = data.get("bpm", 120)
-            state["current_idx"] = data.get("idx", 0)
-
-def set_bpm(new_bpm):
-    if 30 <= new_bpm <= 300:
-        state["bpm"] = int(new_bpm)
-        save_state()
-
-def adjust_bpm(delta):
-    set_bpm(state["bpm"] + delta)
-
-def set_pattern(idx):
-    if 0 <= idx < len(PATTERNS):
-        state["current_idx"] = idx
-        state["pattern_changed"] = True
-        save_state()
-        print(f"Pattern: {PATTERNS[state['current_idx']]['name']}")
-
-load_state()  # Run on boot
-
-# --- TAP TEMPO LOGIC ---
-tap_times = []
-
-def handle_tap():
-    global tap_times
-    now = time.time()
-    # Reset if pause is too long
-    if tap_times and (now - tap_times[-1] > 2.0):
-        tap_times = []
-    
-    tap_times.append(now)
-    # Keep last 4 taps
-    tap_times = tap_times[-4:]
-    
-    if len(tap_times) >= 2:
-        # Calculate BPM
-        intervals = [t - s for s, t in zip(tap_times, tap_times[1:])]
-        avg_interval = sum(intervals) / len(intervals)
-        new_bpm = int(60.0 / avg_interval)
-        if 30 < new_bpm < 300:  # Sanity check
-            state["bpm"] = new_bpm
-            print(f"Tap Tempo: {new_bpm} BPM")
-            save_state()
-
-def handle_start():
-    state["playing"] = not state["playing"]
-    if state["playing"]:
-        global tap_times
-        tap_times = []  # Reset taps on start
-        if GPIO_AVAILABLE:
-            led_status.on()
-        print(f"Started: {PATTERNS[state['current_idx']]['name']} at {state['bpm']} BPM")
-    else:
-        if GPIO_AVAILABLE:
-            led_status.off()
-        print("Stopped")
-
-def next_pattern():
-    state["current_idx"] = (state["current_idx"] + 1) % len(PATTERNS)
-    save_state()
-    if GPIO_AVAILABLE:
-        led_status.blink(on_time=0.1, n=3)
-    print(f"Pattern: {PATTERNS[state['current_idx']]['name']}")
-
-# Wire up buttons
-if GPIO_AVAILABLE:
-    btn_tap.when_pressed = handle_tap
-    btn_start.when_pressed = handle_start
-    btn_next.when_pressed = next_pattern
-    
-# --- SEQUENCER ENGINE ---
-def run_sequencer():
-    step = 0
-    last_beat_time = time.time()
-    while True:
-        if state["playing"]:
-            if state["pattern_changed"]:
-                step = 0
-                state["step"] = 0
-                state["pattern_changed"] = False
-            pattern = PATTERNS[state["current_idx"]]["beats"]
-            beat_type = pattern[step % len(pattern)]
-            
-            # Determine Note
-            note = None
-            if beat_type == 1:
-                note = SOUNDS['accent']
-                is_accent = True
-            elif beat_type == 2:
-                note = SOUNDS['click']
-                is_accent = False
-            # elif beat_type == 0: note = SOUNDS['subdiv']  # Optional
-            
-            # Fire MIDI
-            if note and outport:
-                outport.send(mido.Message('note_on', note=note, velocity=110, channel=MIDI_CHANNEL))
-                time.sleep(0.05)
-                outport.send(mido.Message('note_off', note=note, velocity=0, channel=MIDI_CHANNEL))
-            
-            # LED Pulse
-            if GPIO_AVAILABLE:
-                if note:
-                    led_beat.on()
-                    time.sleep(0.15 if is_accent else 0.05)
-                    led_beat.off()            # Calculate sleep based on BPM and Pattern Resolution
-            sleep_time = 60.0 / state["bpm"]
-            if len(pattern) > 4:
-                sleep_time /= 2  # Speed up for eighth notes
-            
-            # Accurate timing (subtract LED time)
-            remaining_time = sleep_time - (0.15 if (note and is_accent) else 0.05)
-            if remaining_time > 0:
-                time.sleep(remaining_time)
-            
-            # step += 1
-            step = (step + 1) % len(pattern)
-            state["step"] = step
-        else:
-            time.sleep(0.1)
-
-# --- MIDI SETUP ---
-outport = None
-try:
-    ports = mido.get_output_names()
-    # Look for a USB MIDI device
-    matching = [p for p in ports if "USB" in p or "Alesis" in p]
-    port_name = matching[0] if matching else ports[0]
-    outport = mido.open_output(port_name)
-    print(f"Connected to {port_name}")
-except Exception as e:
-    print(f"MIDI Error: {e}. Running in dummy mode.")
-
-# Start Engine
-threading.Thread(target=run_sequencer, daemon=True).start()
-
-print(f"Drum Assistant Ready! Pattern: {PATTERNS[state['current_idx']]['name']}, BPM: {state['bpm']}")
-print("Red button: Start/Stop, Blue button: Tap Tempo, White button: Next Pattern")
-
-# Keep alive
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("\nShutting down...")
-    if state["playing"] and GPIO_AVAILABLE:
-        led_status.off()
+def beat_led_callback(beat_type, is_accent):
+    # Only show LED when a real beat/click happens
+    if not GPIO_AVAILABLE or led_beat is None:
+        return
+    if beat_type in (1, 2):
+        led_beat.on()
+        time.sleep(0.15 if is_accent else 0.05)
         led_beat.off()
+
+
+def set_status_led(on: bool):
+    if not GPIO_AVAILABLE or led_status is None:
+        return
+    if on:
+        led_status.on()
+    else:
+        led_status.off()
+
+
+if GPIO_AVAILABLE:
+    btn_start = Button(PIN_START)
+    btn_tap = Button(PIN_TAP)
+    btn_next = Button(PIN_NEXT)
+
+    led_beat = LED(PIN_BEAT_LED)
+    led_status = LED(PIN_STATUS_LED)
+
+    def _startstop():
+        engine.handle_start()
+        set_status_led(engine.state["playing"])
+
+    btn_start.when_pressed = _startstop
+    btn_tap.when_pressed = engine.handle_tap
+    btn_next.when_pressed = engine.next_pattern
+
+
+if __name__ == "__main__":
+    engine.start_engine(beat_callback=beat_led_callback)
+    st = engine.get_status()
+    print(f"Drum Assistant Ready! Pattern: {st['pattern_name']}, BPM: {st['bpm']}")
+    print("Red button: Start/Stop, Blue button: Tap Tempo, White button: Next Pattern")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        set_status_led(False)
+        if led_beat:
+            led_beat.off()
