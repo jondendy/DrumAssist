@@ -3,8 +3,11 @@ import time
 import threading
 import json
 import os
-
+import sys
 import mido
+
+if sys.platform.startswith('win'):
+    mido.set_backend('mido.backends.winmm')
 
 SAVE_FILE = "dh2_settings.json"
 MIDI_CHANNEL = 9  # Channel 10 in MIDI terms (0-15)
