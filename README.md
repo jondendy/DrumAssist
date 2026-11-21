@@ -48,21 +48,23 @@ pip3 install -r requirements.txt  # Update dependencies if changed
 
 ### Option 1: Raspberry Pi with Hardware (drum_assist2.py)
 
-Full hardware mode with GPIO buttons and LEDs.
+One program that runs the GPIO buttons and LEDs and the phone web UI together.
 
-**Hardware Setup:**
-- GPIO 17: Tap Tempo button (connect to GND)
-- GPIO 27: Start/Stop button (connect to GND)
-- GPIO 22: Status LED
-- GPIO 23: Beat LED
+**Hardware Setup (BCM pin numbers, buttons connect to GND):**
+- GPIO 17: Start/Stop button (red)
+- GPIO 27: Tap Tempo button (blue)
+- GPIO 22: Next button (white): next pattern when stopped, 1-bar fill when playing
+- GPIO 18: Beat LED
+- GPIO 23: Status LED (on while playing)
 - USB OTG adapter for MIDI connection to Alesis SamplePad
 
 **Run:**
 ```bash
 python3 drum_assist2.py
 ```
+Then open `http://drumpi.local:5000` (or `http://<pi-ip>:5000`) on a phone on the same network.
 
-**Note:** Automatically falls back to laptop mode if GPIO is unavailable.
+**Note:** Without GPIO (e.g. on a laptop) the buttons and LEDs are skipped and the web UI still runs.
 
 ### Option 2: Laptop Mode (drum_assist_laptop.py)
 
@@ -117,7 +119,7 @@ After=network.target
 [Service]
 User=pi
 WorkingDirectory=/home/pi/DrumAssist
-ExecStart=/usr/bin/python3 /home/pi/DrumAssist/drum_assist_web.py
+ExecStart=/usr/bin/python3 /home/pi/DrumAssist/drum_assist2.py
 Restart=always
 
 [Install]
@@ -139,7 +141,7 @@ sudo apt-get install hostapd dnsmasq
 # Or use RaspAP: https://raspap.com/
 ```
 
-Connect your phone/tablet to the Pi's hotspot and access the web interface at `192.168.4.1` or `drumpi.local`.
+Connect your phone/tablet to the Pi's hotspot and open the web interface at `http://192.168.4.1:5000` or `http://drumpi.local:5000`.
 
 ## Patterns
 

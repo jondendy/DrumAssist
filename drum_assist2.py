@@ -1,4 +1,6 @@
-# drum_assist2.py
+# drum_assist2.py - Raspberry Pi entry point.
+# One process: GPIO buttons + LEDs + the phone web UI (drum_assist_web.py), sharing one engine.
+import threading
 import time
 
 try:
@@ -6,14 +8,15 @@ try:
     GPIO_AVAILABLE = True
 except (ImportError, RuntimeError):
     GPIO_AVAILABLE = False
-    print("GPIO not available - buttons/LEDs disabled")
+    print("GPIO not available - buttons/LEDs disabled, web UI still runs")
 
 import engine
+from drum_assist_web import app
 
-# GPIO pins (same as your current file)
-PIN_START = 17   # Red
-PIN_TAP = 27     # Blue
-PIN_NEXT = 22    # White
+# GPIO pins (BCM numbering, as in the code before the merge)
+PIN_START = 17   # Red: start/stop
+PIN_TAP = 27     # Blue: tap tempo
+PIN_NEXT = 22    # White: next pattern (stopped) / request fill (playing)
 PIN_BEAT_LED = 18
 PIN_STATUS_LED = 23
 
@@ -22,22 +25,26 @@ led_status = None
 
 
 def beat_led_callback(beat_type, is_accent):
-    # Only show LED when a real beat/click happens
-    if not GPIO_AVAILABLE or led_beat is None:
+    # Runs on the sequencer thread just before the MIDI note goes out,
+    # so it must not block. blink(background=True) returns immediately.
+    if led_beat is None or beat_type not in (1, 2):
         return
-    if beat_type in (1, 2):
-        led_beat.on()
-        time.sleep(0.15 if is_accent else 0.05)
-        led_beat.off()
+    led_beat.blink(on_time=0.15 if is_accent else 0.05, off_time=0, n=1, background=True)
 
 
-def set_status_led(on: bool):
-    if not GPIO_AVAILABLE or led_status is None:
-        return
-    if on:
-        led_status.on()
-    else:
-        led_status.off()
+def _status_led_loop():
+    # Keep the status LED in step with play/stop, whichever source changed it
+    # (button, phone UI or keyboard).
+    last = None
+    while True:
+        playing = engine.state["playing"]
+        if playing != last and led_status is not None:
+            if playing:
+                led_status.on()
+            else:
+                led_status.off()
+            last = playing
+        time.sleep(0.1)
 
 
 if GPIO_AVAILABLE:
@@ -48,25 +55,28 @@ if GPIO_AVAILABLE:
     led_beat = LED(PIN_BEAT_LED)
     led_status = LED(PIN_STATUS_LED)
 
-    def _startstop():
-        engine.handle_start()
-        set_status_led(engine.state["playing"])
-
-    btn_start.when_pressed = _startstop
+    btn_start.when_pressed = engine.handle_start
     btn_tap.when_pressed = engine.handle_tap
     btn_next.when_pressed = engine.next_button_action
 
-if __name__ == "__main__":
+
+def main():
     engine.start_engine(beat_callback=beat_led_callback)
+    if GPIO_AVAILABLE:
+        threading.Thread(target=_status_led_loop, daemon=True).start()
+
     st = engine.get_status()
-    print(f"Drum Assistant Ready! Pattern: {st['pattern_name']}, BPM: {st['bpm']}")
-    print("Red button: Start/Stop, Blue button: Tap Tempo, White button: Next Pattern")
+    print(f"DrumAssist ready! Pattern: {st['pattern_name']}, BPM: {st['bpm']}")
+    print("Red: start/stop, Blue: tap tempo, White: next pattern (or fill while playing)")
+    print("Phone UI: http://drumpi.local:5000 or http://<pi-ip>:5000")
 
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        set_status_led(False)
-        if led_beat:
+        app.run(host="0.0.0.0", port=5000, debug=False)
+    finally:
+        if GPIO_AVAILABLE:
+            led_status.off()
             led_beat.off()
+
+
+if __name__ == "__main__":
+    main()
