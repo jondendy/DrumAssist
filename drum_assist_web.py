@@ -251,6 +251,9 @@ function fill(bars) {
 }
 
 document.addEventListener('keydown', (e) => {
+  // Don't steal keys while the user is typing in the pattern editor
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); tap(); }
   if (e.code === 'Enter') { togglePlay(); }
 });
